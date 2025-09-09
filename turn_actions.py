@@ -22,18 +22,35 @@ class Game:
         self.game_over = False
 
     def check_gameover(self):
-        """Checks if central fund is 0 or if it's over its cap """
+        """Checks if central fund is 0 or over its cap """
         if self.central_fund <= 0:
             # central fund empty - a player has won
+            # Players sorting criteria:
+                # 1. Net worth
+                # 2. Equity (Assets - liabilities)
+                # 3. Bankruptcy status
             print("\nThe central fund has reached $0! Game over.")
-            # change this to sorted by money instead of only winner
-            winning_player = max(self.players, key=lambda p: p.net_worth)
-            print(f"The winner is {winning_player.name} with ${winning_player.net_worth / 10}M.")
+            sorted_players = sorted(
+                    self.players,
+                    key=lambda p: (
+                            -p.net_worth,
+                            -(len(p.statuses.intersection({"STOCK", "BOND"})) - len(p.statuses.intersection({"BAD NEWS"}))),
+                              p.is_bankrupt
+                            )
+                    )
+            print("Final Results:")
+            for i, player in enumerate(sorted_players):
+                    print(f"    {i+1}. {player.name}: ${player.net_worth / 10}M")
             self.game_over = True
             return True
         elif self.central_fund >= self.central_fund_cap:
             # central fund over cap - all players lose
+            # really emphasizes the fact that ALL players FAILED
             print("\nThe central fund has reached its cap! All players lose.")
+            print(f"Final Central Fund value: ${self.central_fund / 10}M")
+            print("Final Results:")
+            for player in self.players:
+                    print(f"    -. {player.name}: FAIL - BANKRUPT")
             self.game_over = True
             return True
         return False
@@ -361,13 +378,13 @@ class Game:
                 self.current_player_index = (self.current_player_index + 1) % self.num_players
                 continue
 
-            # Check for induced bankruptcy - ends turn
+            # Check for induced bankruptcy
             if current_player.net_worth < 1:
                 self.handle_bankruptcy(current_player)
                 self.current_player_index = (self.current_player_index + 1) % self.num_players
                 continue
 
-            # Check for induced anti-trust - does NOT end turn
+            # Check for induced anti-trust
             self.check_antitrust(current_player)
 
             code = self.handle_betting(current_player, can_bet_fund)

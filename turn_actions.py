@@ -20,6 +20,7 @@ class Game:
         self.central_fund_status = 'NORMAL' # either NORMAL or HOT
         self.current_player_index = 0
         self.game_over = False
+        self.free_turns_counter = 0
 
     def check_gameover(self):
         """Checks if central fund is 0 or over its cap """
@@ -77,8 +78,9 @@ class Game:
         player.net_worth = 0
 
         if self.num_players == 2:
-            print("Since this is a 2-player game, the other player gets 2 free turns.")
-            self.free_turns.counter = 2
+            print("Since this is a 2-player game, the other player gets 2 free turns to wear down the Central Fund.")
+            self.free_turns_counter = 2
+            self.current_player_index = (self.current_player_index + 1) % self.num_players
 
     def handle_bankruptcy_court(self, player):
         """Manages the d4 roll for the player to get back in the game"""
@@ -86,10 +88,9 @@ class Game:
         print(f"{player.name} is going to bankruptcy court...")
         time.sleep(3)
         d4_roll = roll_d4()
-        new_worth = d4_roll + 5
         if self.num_players == 2:
-            print(f"Welcome back, {player.name}! You now have ${new_worth/10}M.")
-            player.net_worth = new_worth
+            player.net_worth = d4_roll + 5
+            print(f"Welcome back, {player.name}! You now have ${player.net_worth/10}M.")
             player.is_bankrupt = False
         else:
             if d4_roll % 2 == 0:
@@ -100,7 +101,6 @@ class Game:
                 player.net_worth += d4_roll
                 print(f"{player.name} is still bankrupt. Try again next turn.")
                 return 1
-        
 
     def handle_d6_roll(self, player):
         """Manages the first phase of a player's turn: rolling the two d6s"""
@@ -207,7 +207,10 @@ class Game:
         if "BOND" in player.statuses:
             print(f"\n[!] Slow and steady wins the race: Thanks to your Bond, your losses are HALVED.")
 
-        if can_bet_fund:
+        if can_bet_fund == "BANKRUPTCY":
+            bet_type = 'fund'
+
+        elif can_bet_fund:
             bet_type = input("Do you want to bet against the Central Fund or another player? (fund/player): ").lower()
             if bet_type not in ['fund', 'player']:
                 print("Indecisive? The door is closed! Bet against a player")
@@ -220,7 +223,7 @@ class Game:
         if bet_type == 'player':
             opponent = None
             while not opponent:
-                opponent_name = input("Who do you want to bet against? ")
+                opponent_name = input("Type the name of the person you want to bet against. ")
                 for p in self.players:
                     if p.name.lower() == opponent_name.lower() and p.name.lower() != player.name.lower() and not p.is_bankrupt:
                         opponent = p
@@ -359,42 +362,77 @@ class Game:
     def play(self):
         """While loop controlling the game"""
         while not self.game_over:
-            time.sleep(3)
+            print("\n\n\n\n\n\n")
             current_player = self.players[self.current_player_index]
             current_player.statuses = set()
-            self.display_game_state()
             time.sleep(3)            
             print(f"\nIt's {current_player.name}'s turn.")
+            print("Rolling...")
+            time.sleep(3)
 
-            # Handle pre-existing bankruptcy
-            if current_player.is_bankrupt or current_player.net_worth < 1:
+            # 2-player free turns
+            if self.num_players == 2 and self.free_turns_counter > 0:
+                print(f"Your opponent is bankrupt. {current_player.name} gets 2 free turns to whittle down the Central Fund.")
+                self.display_game_state()
+                can_bet_fund = self.handle_d6_roll(current_player)
+                self.display_game_state()
+                # induced state check after rolling
+                if current_player.net_worth < 1:
+                    self.handle_bankruptcy(current_player)
+                self.check_antitrust(current_player)
+                # bet
+                code = self.handle_betting(current_player, can_bet_fund="BANKRUPT")
+                if code is not None:
+                    print("You are too broke to bet. Turn over.")
+                # induced states check after betting
+                if current_player.net_worth < 1:
+                    self.handle_bankruptcy(current_player)
+                self.check_antitrust(current_player)
+
+                if self.check_gameover():
+                    break
+
+                self.free_turns_counter -= 1
+                if self.free_turns_counter <= 0:
+                    print("Free turns complete. Game will resume normally.")
+                    self.current_player_index = (self.current_player_index + 1) % self.num_players
+                continue
+
+            # bankrupt player's turn
+            elif current_player.is_bankrupt:
+                self.display_game_state()
                 code = self.handle_bankruptcy_court(current_player)
                 if code is not None:
                     self.current_player_index = (self.current_player_index + 1) % self.num_players
                     continue
-            
-            can_bet_fund = self.handle_d6_roll(current_player)
-            if can_bet_fund == -2:
-                self.current_player_index = (self.current_player_index + 1) % self.num_players
-                continue
 
-            # Check for induced bankruptcy
-            if current_player.net_worth < 1:
-                self.handle_bankruptcy(current_player)
-                self.current_player_index = (self.current_player_index + 1) % self.num_players
-                continue
+            # normal turn
+            else:
+                current_player.statuses.clear()
+                self.display_game_state()
+                can_bet_fund = self.handle_d6_roll(current_player)
+                self.display_game_state()
+                # induced state check after rolling
+                if current_player.net_worth < 1:
+                    self.handle_bankruptcy(current_player)
+                    self.current_player_index = (self.current_player_index + 1) % self.num_players
+                    continue
+                self.check_antitrust(current_player)
 
-            # Check for induced anti-trust
-            self.check_antitrust(current_player)
+                code = self.handle_betting(current_player, can_bet_fund)
+                if code is not None:
+                    print("You are too broke to bet. Turn over.")
 
-            code = self.handle_betting(current_player, can_bet_fund)
-            if code is not None:
-                print("You are too broke to bet. Turn over")
-
-            # Check for game over
-            if self.check_gameover():
-                break
+                # indeuced state check after betting
+                if current_player.net_worth < 1:
+                    self.handle_bankruptcy(current_player)
+                    self.current_player_index = (self.current_player_index + 1) % self.num_players
+                    continue
+                
+                if self.check_gameover():
+                    break
 
             self.current_player_index = (self.current_player_index + 1) % self.num_players
+            
             
             
